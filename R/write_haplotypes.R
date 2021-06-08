@@ -129,6 +129,7 @@ progeny_haplotypes <- function(...,
   ind.names <- unique(unlist(ind.names)) 
   if(length(unique(n.ind)) != 1) stop("At least one of the sequences have different number of individuals in dataset.")
   n.ind <- unique(n.ind)
+  if(is.null(ind.names)) ind.names <- 1: n.ind
   if(ind[1] == "all"){
     ind <- 1:n.ind
   } 
@@ -186,10 +187,10 @@ progeny_haplotypes <- function(...,
     if (is(input.map[[1]]$data.name, c("backcross"))){
       cross <- "backcross"
       probs <- probs %>% 
-        mutate(P1_H1 = V1 + V2, # homozigote parent
-               P1_H2 = 0,
-               P2_H1 = V2, 
-               P2_H2 = V1) 
+        mutate(P1_H1 = 1, # homozigote parent
+               P1_H2 = V1,
+               P2_H1 = 0, 
+               P2_H2 = V2) 
       
     } else if (is(input.map[[1]]$data.name, c("riself", "risib"))){
       cross <- "rils"
@@ -200,7 +201,7 @@ progeny_haplotypes <- function(...,
                P2_H2 = V2)
     }
   }
-                             
+  
   probs$marker = colnames(input.map[[1]]$data.name$geno)[probs$marker]
   
   probs <- probs %>% 
@@ -251,35 +252,67 @@ plot.onemap_progeny_haplotypes <- function(x,
                                            show_markers = TRUE, 
                                            main = "Genotypes", ncol=4, ...){
   
-  colors <- ifelse(is(x,"outcross"), "for.split", "alleles")  
+  if(is(x,"outcross")){
+    probs <- cbind(x, for.split= paste0(x$parents, "_", x$homologs))
+    
+    probs <- probs %>% group_by(ind, grp, for.split) %>%
+      do(rbind(.,.[nrow(.),])) %>%
+      do(mutate(.,
+                pos2 = c(0,pos[-1]-diff(pos)/2), # Because we don't know exactly where 
+                # the recombination occurs, we ilustrate it in the mean point between 
+                # markers
+                pos = c(pos[-nrow(.)], NA)))
+    
+    p <- ggplot(probs, aes(x = pos, col= for.split, alpha = prob)) + ggtitle(main) +
+      facet_wrap(~ ind + grp , ncol = ncol) +
+      scale_alpha_continuous(range = c(0,1)) +
+      guides(fill = guide_legend(reverse = TRUE)) +
+      labs(alpha = "Prob", col = "Allele", x = "position (cM)")
+    
+    if(is.null(col)) p <- p + scale_color_brewer(palette="Set1")
+    else p <- p + scale_color_manual(values = rev(col))
+    
+    if(position == "stack"){
+      p <- p + geom_line(aes(x = pos2, y = parents), size = ifelse(show_markers, 4, 5)) + labs(y = "parents")
+      if(show_markers) p <- p + geom_point(aes(y = parents), size = 5, stroke = 2, na.rm = T, shape = "|")
+    } 
+    if(position == "split"){
+      p <- p + geom_line(aes(x = pos2, y = for.split), size = ifelse(show_markers, 4, 5))
+      if(show_markers) p <- p + geom_point(aes(y = for.split), size = 5, stroke = 2, na.rm = T, shape = "|")
+    } 
+  } else{
+    probs <- cbind(x, for.split= paste0(x$parents, "_", x$homologs))
+    
+    probs <- probs %>% group_by(ind, grp, for.split) %>%
+      do(rbind(.,.[nrow(.),])) %>%
+      do(mutate(.,
+                pos2 = c(0,pos[-1]-diff(pos)/2), # Because we don't know exactly where 
+                # the recombination occurs, we ilustrate it in the mean point between 
+                # markers
+                pos = c(pos[-nrow(.)], NA)))
+    
+    p <- ggplot(probs, aes(x = pos, col= parents, alpha = prob)) + ggtitle(main) +
+      facet_wrap(~ ind + grp , ncol = ncol) +
+      scale_alpha_continuous(range = c(0,1)) +
+      guides(fill = guide_legend(reverse = TRUE)) +
+      labs(alpha = "Prob", col = "Parent", x = "position (cM)")
+    
+    if(is.null(col)) p <- p + scale_color_brewer(palette="Set1")
+    else p <- p + scale_color_manual(values = rev(col))
+    
+    if(position == "stack"){
+      p <- p + geom_line(aes(x = pos2, y = factor(homologs, levels = c("H2", "H1"))), size = ifelse(show_markers, 4, 5)) +
+        ylab("Haplotype")
+      if(show_markers) p <- p + geom_point(aes(y = factor(homologs, levels = c("H2", "H1"))), size = 5, stroke = 2, na.rm = T, shape = "|")
+    } 
+    if(position == "split"){
+      p <- p + geom_line(aes(x = pos2, y = factor(for.split, levels = c("P2_H2","P1_H2","P2_H1","P1_H1"))), size = ifelse(show_markers, 4, 5)) + 
+        scale_y_discrete(labels = c("P1_H1" = "H1", "P2_H1" = "H1", "P1_H2" = "H2", "P2_H2" = "H2"))+
+        ylab("Haplotype")
+        if(show_markers) p <- p + geom_point(aes(y = factor(for.split, levels = c("P2_H2","P1_H2","P2_H1","P1_H1"))), size = 5, stroke = 2, na.rm = T, shape = "|")
+    } 
+  }
   
-  probs <- cbind(x, for.split= paste0(x$parents, "_", x$homologs))
-  
-  probs <- probs %>% group_by(ind, grp, for.split) %>%
-    do(rbind(.,.[nrow(.),])) %>%
-    do(mutate(.,
-              pos2 = c(0,pos[-1]-diff(pos)/2), # Because we don't know exactly where 
-              # the recombination occurs, we ilustrate it in the mean point between 
-              # markers
-              pos = c(pos[-nrow(.)], NA)))
-  
-  p <- ggplot(probs, aes(x = pos, col=get(colors), alpha = prob)) + ggtitle(main) +
-    facet_wrap(~ ind + grp , ncol = ncol) +
-    scale_alpha_continuous(range = c(0,1)) +
-    guides(fill = guide_legend(reverse = TRUE)) +
-    labs(alpha = "Prob", col = "Allele", x = "position (cM)")
-  
-  if(is.null(col)) p <- p + scale_color_brewer(palette="Set1")
-  else p <- p + scale_color_manual(values = rev(col))
-  
-  if(position == "stack"){
-    p <- p + geom_line(aes(x = pos2, y = parents), size = ifelse(show_markers, 4, 5)) + labs(y = "parents")
-    if(show_markers) p <- p + geom_point(aes(y = parents), size = 5, stroke = 2, na.rm = T, shape = "|")
-  } 
-  if(position == "split"){
-    p <- p + geom_line(aes(x = pos2, y = for.split), size = ifelse(show_markers, 4, 5))
-    if(show_markers) p <- p + geom_point(aes(y = for.split), size = 5, stroke = 2, na.rm = T, shape = "|")
-  } 
   return(p)
 }
 
